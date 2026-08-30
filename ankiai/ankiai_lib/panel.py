@@ -41,6 +41,15 @@ from .prompts import FOLLOWUP_RULE, build_messages
 
 _REPAINT_MS = 100
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+# 还没有任何对话时的空状态引导（走同一套主题配色）
+_EMPTY_HTML = (
+    "<h2>🤖 AnkAI 解释面板</h2>"
+    "<p>当前还没有对话，可以这样开始：</p>"
+    "<ol>"
+    "<li>在<b>复习界面</b>划选卡片文字，右键选「🤖 AI 解释」；</li>"
+    "<li>点下方「🕘 历史」，回溯任意一次历史对话，可继续追问。</li>"
+    "</ol>"
+)
 
 
 class _ContentBrowser(QTextBrowser):
@@ -653,11 +662,13 @@ class ExplainPanel(QDockWidget):
         if not self._dirty:
             return
         self._dirty = False
+        body = self.log_md + self.turn_md
         bar = self.view.verticalScrollBar()
         # 必须在 setHtml 前取值：setHtml 后滚动条已重置，拿不到"用户原来在哪"
         was_at_bottom = bar.value() >= bar.maximum() - 8
         old_pos = bar.value()
-        self.view.setHtml(self._wrap_html(md_to_html(self.log_md + self.turn_md)))
+        html = md_to_html(body) if body.strip() else _EMPTY_HTML
+        self.view.setHtml(self._wrap_html(html))
         # 生成中内容只在末尾追加：停在底部才跟随新内容；向上翻阅时保持原位置
         bar.setValue(bar.maximum() if was_at_bottom else min(old_pos, bar.maximum()))
 

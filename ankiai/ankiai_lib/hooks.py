@@ -212,11 +212,9 @@ class AnkAI:
         self.run_in_background(work)
 
     def show_panel_toggle(self) -> None:
-        """显示/隐藏解释面板；隐藏只是收起，对话保留，可随时唤回。"""
-        panel = self.panel
-        if panel is None:
-            tooltip("AnkAI：还没有解释面板——先划选卡片文字触发一次 AI 解释")
-            return
+        """显示/隐藏解释面板；隐藏只是收起，对话保留，可随时唤回。
+        面板按需创建：进入 Anki 后不划词也能直接打开面板查看/回溯历史。"""
+        panel = self._ensure_panel()
         if panel.isVisible():
             panel.hide()
         else:
