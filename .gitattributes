@@ -1,0 +1,10 @@
+# 统一仓库行尾：文本文件入库 LF、检出 LF（避免 Windows 上 autocrlf 的 CRLF 漂移与告警）
+* text=auto eol=lf
+
+# 二进制产物不做任何转换
+*.jpg -text
+*.jpeg -text
+*.png -text
+*.gif -text
+*.mp3 -text
+*.ankiaddon -text
