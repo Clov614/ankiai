@@ -29,11 +29,11 @@
 ## 2. 已完成的发布准备
 
 - ✅ `manifest.json` 修正为 Anki 官方 schema（原版缺 `package` 字段，双击 .ankiaddon 安装会报错）：
-  `package=ankiai`、`human_version`（当前 0.2.0）、`min_point_version=250900`（要求 Anki 25.09+）
+  `package=ankiai`、`human_version`（当前 0.2.1）、`min_point_version=250900`（要求 Anki 25.09+）
 - ✅ 添加 `LICENSE`（AGPL-3.0 —— Anki 本体是 AGPL，AnkiWeb 上架必须选 AGPL 或兼容协议）
 - ✅ `README.md` 增加面向最终用户的「安装」章节与许可说明
 - ✅ `panel.py` 中一处面向私有环境措辞（"网关"）改为通用表述
-- ✅ 安装包已构建并校验：[dist/ankiai-0.2.0.ankiaddon](dist/ankiai-0.2.0.ankiaddon)（约 62 KB，23 个文件，内容与源码逐文件比对一致；0.1.0 旧包仍在 dist/ 供回溯）
+- ✅ 安装包已构建并校验：[dist/ankiai-0.2.1.ankiaddon](dist/ankiai-0.2.1.ankiaddon)（约 63 KB，23 个文件，内容与源码逐文件比对一致）；0.2.0 已发布于 GitHub Releases（2026-08-31），历史包留在 dist/ 供回溯
 
 ## 3. 路径 A：GitHub 发布（当天可完成）
 
@@ -55,6 +55,15 @@ README 的「方式二」已写好指向 Releases 的链接，用户下载后双
 ## 4. 路径 B：AnkiWeb 发布（账号资格通过后）
 
 > **2026-08-30 实际尝试记录**：表单已完整填写（标题/标签/支持页/版本分支 25.09/描述/安装包），提交了 3 次（经抓包验证请求体完整、格式正常，multipart 49033 字节含全部文件），服务器均返回 `400 "try again later"`，无任何字段级错误。这与官方论坛确认的账号准入门槛一致——**账号活跃使用历史不足时，上传接口被统一拒绝**（官方不公布标准，通常需数月活跃使用）。GitHub 渠道不受影响。等账号资格通过后按下面步骤重试即可。
+>
+> **2026-08-31 论坛调研（原因已实锤）**：`400 "try again later"` 就是新账号被反滥用门槛拦截的表现，与包内容无关——
+> - [67798](https://forums.ankiweb.net/t/getting-try-again-later-error-when-trying-to-submit-my-add-on/67798)：楼主症状完全相同（同一接口 `/svc/shared/upload-addon` 返回 400、无字段错误），版主 abdo 拿同一文件在自己老账号上一次上传成功，定性"问题在账号不在包"；2026-01 起 AnkiWeb 对新账号会显示明确提示 *"Sorry, your account is too new for this action."*（我们拿到的仍是旧式模糊 400）
+> - [70258](https://forums.ankiweb.net/t/unable-to-upload-add-on-because-my-account-is-too-new/70258)：版主明确**没有例外通道**，判据刻意保密以防绕过，标准是"正规 Anki 用户的正规 AnkiWeb 账号"
+> - [68849](https://forums.ankiweb.net/t/anki-add-on-problem-r/68849)：该门槛 2026 年才收紧，起因是有恶意开发者用 AI 攻击 AnkiWeb 服务器
+>
+> **注意两个"假阳性"**：论坛有 2 例其实是登录错了（另一个更老的）账号、或自己脚本 bug 冒充此错——重试前先确认浏览器登录的就是目标账号。若有论坛老账号可私信 @moderators 求豁免（有成功先例），纯新账号大概率被拒。
+>
+> **下一步**：用目标账号正常同步使用 Anki（每周几次即可），隔 3-4 周重试上传；届时若仍被拦会看到明确的 "account is too new" 文字而非 400。期间 GitHub Releases 渠道分发不受任何影响。
 
 1. 登录 [ankiweb.net](https://ankiweb.net) → [shared/addons](https://ankiweb.net/shared/addons) 页点 **Upload**（或直接访问 [ankiweb.net/shared/upload](https://ankiweb.net/shared/upload)）
 2. 上传 `dist/ankiai-0.1.0.ankiaddon`
@@ -85,6 +94,7 @@ README 的「方式二」已写好指向 Releases 的链接，用户下载后双
 
 ## 6. 版本记录
 
+- **0.2.1**（已打包，待发 Release）：小修与清理——解释历史写入改原子替换（防截断）；音色列表兼容区域变体与 HD 音色（`zh-CN-liaoning-*`、`*:DragonHD*`）；HTTP User-Agent 版本号自动取自 manifest（不再硬编码）；md2html 支持 Markdown 链接（拦截 `javascript:`）并合并连续引用行；deploy 不再拷贝 docs/；解释面板隐藏时跳过渲染刷新；新增 `.gitattributes` 统一 LF
 - **0.2.0**：会话制卡——解释面板「🎴 生成卡片」把当前对话提炼成 EnWords 卡片（LLM 抽取候选 + 复选 + 任意牌组 + 单词发音 + 查重 + 自动创建 EnWords 笔记类型）；已重新 `python package.py` 打包（新模块 cardgen/notes/cards_dialog/entemplate 走 glob 自动进包）
 - **0.1.0**：首发（划选 AI 解释 + 多轮追问 + Edge TTS 朗读）
 
