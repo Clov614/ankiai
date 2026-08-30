@@ -1,6 +1,6 @@
 {
   "package": "ankiai",
-  "name": "AnkAI - 划选 AI 解释与朗读",
-  "human_version": "0.1.0",
+  "name": "AnkAI - 划选 AI 解释、朗读与会话制卡",
+  "human_version": "0.2.0",
   "min_point_version": 250900
 }

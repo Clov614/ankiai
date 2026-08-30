@@ -56,6 +56,12 @@ DEFAULTS: dict = {
         "default_format": "mirra",  # mirra | sentence
         "custom_prompt": "",
     },
+    "cards": {
+        "model_name": "EnWords",  # 制卡用的笔记类型（缺失时自动创建）
+        "default_deck": "",  # 上次成功制卡的牌组；留空用当前牌组
+        "default_tags": "ankiai",
+        "attach_word_audio": True,  # 制卡时用 edge-tts 附单词发音
+    },
     "ui": {"panel_width": 560, "panel_height": 640, "debug_log": False},
 }
 

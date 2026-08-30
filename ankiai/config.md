@@ -38,6 +38,15 @@ API Key 也可用环境变量 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MOD
 | `default_format` | `mirra`（米拉四段式：翻译/词汇/语法解析/其他知识点）或 `sentence`（例句解析：逐项解析/整句解读/文化点/记忆钩子） |
 | `custom_prompt` | 自定义系统提示词；填写后整体覆盖内置两种格式 |
 
+## cards — 会话制卡（EnWords 模板）
+
+| 键 | 说明 |
+|---|---|
+| `model_name` | 制卡用的笔记类型名，默认 `EnWords`；集合里没有时插件会按内置模板自动创建 |
+| `default_deck` | 上次成功制卡的牌组（制卡对话框记住上次选择）；留空则用当前牌组 |
+| `default_tags` | 制卡对话框里标签输入框的默认值，多个标签用空格/逗号分隔 |
+| `attach_word_audio` | `true` 时制卡自动用 edge-tts 合成单词发音，写入媒体库并附到卡片正面自动播放 |
+
 ## ui — 界面与其他
 
 | 键 | 说明 |

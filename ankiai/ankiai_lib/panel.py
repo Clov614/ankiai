@@ -244,6 +244,7 @@ class ExplainPanel(QDockWidget):
         self.turn_md = ""  # 当前轮流式缓冲
         self._dirty = False
         self.busy = False
+        self._cards_busy = False  # 会话制卡抽取中（与对话 busy 分开）
         self.session: dict | None = None  # 当前会话元信息（用于历史存取）
         # 状态栏状态
         self._t0 = 0.0
@@ -306,6 +307,7 @@ class ExplainPanel(QDockWidget):
 
         btns = QHBoxLayout()
         for text, slot in (
+            ("🎴 生成卡片", self.generate_cards),
             ("🕘 历史", self.show_history),
             ("新对话", self.new_conversation),
             ("复制全文", self.copy_all),
@@ -426,8 +428,12 @@ class ExplainPanel(QDockWidget):
 
     def load_session(self, record: dict) -> None:
         """从历史回溯：恢复对话与显示，可继续追问。"""
-        if self.busy:
-            tooltip("AnkAI：当前还在生成中，稍后再回溯")
+        if self.busy or self._cards_busy:
+            tooltip(
+                "AnkAI：正在提炼卡片候选，请等它完成再切换历史"
+                if self._cards_busy
+                else "AnkAI：当前还在生成中，稍后再回溯"
+            )
             return
         msgs = record.get("messages") or []
         if not msgs:
@@ -451,13 +457,16 @@ class ExplainPanel(QDockWidget):
         tooltip("AnkAI：已回到该历史对话，可继续追问")
 
     def show_history(self) -> None:
+        # 单实例复用：反复开关不再累积隐藏的 QDialog；打开前刷新保证
+        # 包含最新的解释轮次
         dlg = getattr(self, "_history_dlg", None)
-        if dlg is not None and dlg.isVisible():
-            dlg.raise_()
-            dlg.activateWindow()
-            return
-        self._history_dlg = HistoryDialog(self)
-        self._history_dlg.show()
+        if dlg is None:
+            dlg = HistoryDialog(self)
+            self._history_dlg = dlg
+        dlg.refresh()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def send_followup(self) -> None:
         q = self.input.toPlainText().strip()
@@ -472,8 +481,12 @@ class ExplainPanel(QDockWidget):
         self._start_turn()
 
     def new_conversation(self) -> None:
-        if self.busy:
-            tooltip("AnkAI：当前还在生成中")
+        if self.busy or self._cards_busy:
+            tooltip(
+                "AnkAI：正在提炼卡片候选，请等它完成再开新对话"
+                if self._cards_busy
+                else "AnkAI：当前还在生成中"
+            )
             return
         self.messages = []
         self.log_md = ""
@@ -488,6 +501,59 @@ class ExplainPanel(QDockWidget):
 
         QApplication.clipboard().setText(self.log_md + self.turn_md)
         tooltip("AnkAI：已复制全文")
+
+    # ---------- 会话制卡 ----------
+
+    def generate_cards(self) -> None:
+        """把当前会话内容提炼成 EnWords 卡片候选，由用户挑选后写入任意牌组。"""
+        if self.busy or self._cards_busy:
+            tooltip(
+                "AnkAI：正在提炼卡片候选…（LLM 调用中，完成后会自动弹出制卡窗口）"
+                if self._cards_busy
+                else "AnkAI：当前还在生成中"
+            )
+            return
+        if not self.messages:
+            tooltip("AnkAI：还没有对话内容——先划选文字触发一次 AI 解释")
+            return
+        self._cards_busy = True
+        self.status.setVisible(True)
+        self.status.setStyleSheet(f"color: {self._muted};")
+        self.status.setText("🎴 正在从会话中提炼卡片候选…")
+        # 快照与“来源”都在点击时固定：提炼期间禁止切换会话，但即便将来放宽，
+        # 也不能让完成时的 self.session 串进来源字段
+        snapshot = list(self.messages)
+        session = self.session or {}
+        source = f"AnkAI {session.get('time', '')}".strip()
+        self.addon.run_in_background(lambda: self._cards_work(snapshot, source))
+
+    def _cards_work(self, snapshot: list[dict], source: str) -> None:
+        from .cardgen import extract_candidates
+        from .util import log, log_exc
+
+        try:
+            cfg = self.addon.get_config()
+            candidates = extract_candidates(snapshot, cfg, source=source)
+        except Exception as exc:
+            log_exc("generate_cards")
+            self.addon.run_on_main(lambda e=exc: self._cards_error(e))
+            return
+        log(f"cards extracted n={len(candidates)}")
+        self.addon.run_on_main(lambda cs=candidates: self._on_candidates(cs))
+
+    def _cards_error(self, exc: Exception) -> None:
+        self._cards_busy = False
+        self.status.setText(f"❌ {str(exc)[:200]}")
+        self.status.setStyleSheet(f"color: {self._error_fg};")
+        tooltip(f"AnkAI：制卡失败——{str(exc)[:100]}")
+
+    def _on_candidates(self, candidates: list) -> None:
+        from .cards_dialog import CardCandidatesDialog
+
+        self._cards_busy = False
+        self.status.setVisible(False)
+        dlg = CardCandidatesDialog(self, candidates)
+        dlg.exec()
 
     # ---------- 后台调用与流式 ----------
 

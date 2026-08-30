@@ -26,6 +26,12 @@
     "default_format": "mirra",
     "custom_prompt": ""
   },
+  "cards": {
+    "model_name": "EnWords",
+    "default_deck": "",
+    "default_tags": "ankiai",
+    "attach_word_audio": true
+  },
   "ui": {
     "panel_width": 560,
     "panel_height": 640,

@@ -101,6 +101,7 @@ class SettingsDialog(QDialog):
         lay.addWidget(self._llm_group())
         lay.addWidget(self._tts_group())
         lay.addWidget(self._explain_group())
+        lay.addWidget(self._cards_group())
         lay.addWidget(self._ui_group())
 
         footer = QHBoxLayout()
@@ -198,6 +199,20 @@ class SettingsDialog(QDialog):
         form.addRow("自定义提示词", self.custom_prompt)
         return g
 
+    def _cards_group(self) -> QGroupBox:
+        g = QGroupBox("🎴 制卡（会话 → EnWords 卡片，模板缺失时自动创建）")
+        form = QFormLayout(g)
+        self.cards_model = QLineEdit()
+        form.addRow("笔记类型名", self.cards_model)
+        self.cards_deck = QLineEdit()
+        self.cards_deck.setPlaceholderText("留空使用当前牌组（制卡后会记住上次选择）")
+        form.addRow("默认牌组", self.cards_deck)
+        self.cards_tags = QLineEdit()
+        form.addRow("默认标签", self.cards_tags)
+        self.cards_audio = QCheckBox("制卡时自动附加单词发音（edge-tts，无需 key）")
+        form.addRow("", self.cards_audio)
+        return g
+
     def _ui_group(self) -> QGroupBox:
         g = QGroupBox("界面与其他")
         form = QFormLayout(g)
@@ -232,6 +247,12 @@ class SettingsDialog(QDialog):
             self._set_voice(combo, tts_cfg.get(key, ""))
 
         self.custom_prompt.setPlainText(self.cfg["explain"].get("custom_prompt", ""))
+
+        cards = self.cfg["cards"]
+        self.cards_model.setText(cards.get("model_name", "EnWords"))
+        self.cards_deck.setText(cards.get("default_deck", ""))
+        self.cards_tags.setText(cards.get("default_tags", "ankiai"))
+        self.cards_audio.setChecked(bool(cards.get("attach_word_audio", True)))
 
         ui = self.cfg["ui"]
         self.panel_width.setValue(int(ui.get("panel_width", 560)))
@@ -319,6 +340,12 @@ class SettingsDialog(QDialog):
 
         cfg["explain"]["default_format"] = self.fmt.currentData()
         cfg["explain"]["custom_prompt"] = self.custom_prompt.toPlainText()
+
+        cards = cfg["cards"]
+        cards["model_name"] = self.cards_model.text().strip() or "EnWords"
+        cards["default_deck"] = self.cards_deck.text().strip()
+        cards["default_tags"] = self.cards_tags.text().strip()
+        cards["attach_word_audio"] = self.cards_audio.isChecked()
 
         cfg["ui"]["panel_width"] = self.panel_width.value()
         cfg["ui"]["panel_height"] = self.panel_height.value()

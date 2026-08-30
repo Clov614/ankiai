@@ -122,6 +122,129 @@ check("voice_ru 默认存在", util.DEFAULTS["tts"]["voice_ru"].startswith("ru-R
 merged_cfg = util.deep_merge(util.DEFAULTS, cfg_disk)
 check("config.json 含新键或回退默认", merged_cfg["ui"]["panel_width"] == util.DEFAULTS["ui"]["panel_width"])
 
+# ---- LLMError 透传（业务错误不套"网络请求失败"前缀）----
+_orig_post_sse = llm._post_sse
+
+
+def _raise_llm_error(*_args, **_kwargs):
+    raise llm.LLMError("配额不足")
+
+
+llm._post_sse = _raise_llm_error
+try:
+    llm._post_with_retry("http://example.invalid", {}, {}, None)
+    check("LLMError 透传不换前缀", False, "未抛出")
+except llm.LLMError as exc:
+    check("LLMError 透传不换前缀", str(exc) == "配额不足")
+finally:
+    llm._post_sse = _orig_post_sse
+
+# ---- 可重试错误恢复（连接中断一次后成功）----
+_calls = {"n": 0}
+
+
+def _flaky_post_sse(_url, _headers, _body, _on_delta, _timeout):
+    _calls["n"] += 1
+    if _calls["n"] == 1:
+        raise ConnectionError("connection reset")
+    return "ok"
+
+
+llm._post_sse = _flaky_post_sse
+try:
+    _reply = llm._post_with_retry("http://example.invalid", {}, {}, None)
+    check("可重试错误后自动恢复", _reply == "ok" and _calls["n"] == 2)
+finally:
+    llm._post_sse = _orig_post_sse
+
+# ---- 会话制卡：模板定义 ----
+from ankiai_lib import cardgen, entemplate  # noqa: E402
+
+check("EnWords 字段数与顺序", entemplate.FIELDS[0] == "单词" and len(entemplate.FIELDS) == 10)
+check("EnWords 模板名", entemplate.MODEL_NAME == "EnWords" and entemplate.TEMPLATE_NAME == "EnWords Card")
+check("正面含单词与自动播放", "{{单词}}" in entemplate.QFMT and ".replay-button" in entemplate.QFMT)
+check("背面含例句与AI解析", "{{原文例句}}" in entemplate.AFMT and "{{#AI解析}}" in entemplate.AFMT)
+check("CSS 含深色适配与高亮", "nightMode" in entemplate.CSS and "b.hl" in entemplate.CSS)
+
+# ---- 会话制卡：JSON 解析 ----
+_ARRAY = json.dumps(
+    [
+        {"单词": "decidedly", "音标": "di'saididli", "词性": "副词", "中文释义": "果断地",
+         "CEFR": "C1", "原文例句": 'Amy said it <b class="hl">decidedly</b>.',
+         "例句译文": "艾米斩钉截铁地说。", "AI解析": "1. …<br>2. …", "词义概述": "下巴一扬，没商量"},
+        {"单词": "decidedly", "中文释义": "重复词条应被去重"},
+        {"单词": "", "中文释义": "缺单词应被丢弃"},
+        {"中文释义": "缺单词应被丢弃"},
+        {"单词": "get a nice box", "中文释义": "表达卡", "词性": "短语",
+         "音标": "不该有音标"},
+        "不是对象的元素",
+    ],
+    ensure_ascii=False,
+)
+for label, raw in (
+    ("裸 JSON", _ARRAY),
+    ("围栏包裹", f"```json\n{_ARRAY}\n```"),
+    ("前后带说明", f"好的，以下是卡片：\n{_ARRAY}\n以上就是全部内容。"),
+):
+    cands = cardgen.extract_candidates(
+        [{"role": "user", "content": "x"}], util.DEFAULTS, source="AnkAI 测试",
+        chat_fn=lambda _m, _c, _raw=raw: _raw,
+    )
+    check(
+        f"cardgen 解析（{label}）",
+        len(cands) == 2
+        and cands[0].word == "decidedly"
+        and cands[0].cefr == "C1"
+        and cands[0].source == "AnkAI 测试"
+        and cands[1].pos == "phrase"  # 短语卡词性归一化
+        and cands[1].phonetic == "",
+    )
+try:
+    cardgen.parse_json_array("抱歉，我无法输出 JSON。")
+    check("cardgen 残缺输出报错", False, "未抛出")
+except cardgen.CardGenError:
+    check("cardgen 残缺输出报错", True)
+try:
+    cardgen.parse_json_array('{"单词": "不是数组"}')
+    check("cardgen 非数组报错", False, "未抛出")
+except cardgen.CardGenError:
+    check("cardgen 非数组报错", True)
+try:
+    cardgen.parse_json_array('[{"单词": "w", "中文释义": "m",}]')  # 尾逗号应被修复
+    check("cardgen 容忍尾逗号", True)
+except cardgen.CardGenError as exc:
+    check("cardgen 容忍尾逗号", False, str(exc))
+check(
+    "抽取提示词含字段与规则",
+    all(
+        k in prompts.CARD_EXTRACT_PROMPT
+        for k in ("单词", "原文例句", "AI解析", "JSON", "phrase", "固定搭配", "俚语", "习语", "严禁把词条单独包上")
+    ),
+)
+_c2 = cardgen._norm_candidate({"单词": "break a leg", "中文释义": "祝好运", "词性": "俚语"})
+check(
+    "俚语/习语归一化为 phrase",
+    _c2 is not None and _c2.pos == "phrase" and _c2.phonetic == "",
+)
+
+# ---- 会话制卡：笔记字段映射 ----
+_cand = cardgen.CardCandidate(word="decidedly", meaning="果断地", source="AnkAI")
+_fields = _cand.to_note_fields()
+check(
+    "候选 → EnWords 字段映射",
+    list(_fields.keys()) == entemplate.FIELDS and _fields["单词"] == "decidedly",
+)
+
+# ---- deploy 子进程输出解码（中文 Windows tasklist 输出为 GBK）----
+import deploy  # noqa: E402
+
+check(
+    "deploy GBK 输出解码",
+    "anki.exe" in deploy._decode_output("映像名称 anki.exe".encode("gbk")).lower(),
+)
+check("deploy UTF-8 输出解码", "anki.exe" in deploy._decode_output(b"Image Name: anki.exe"))
+check("anki_running 返回布尔", isinstance(deploy.anki_running(), bool))
+
 print()
 if failures:
     print(f"失败 {len(failures)} 项：{failures}")

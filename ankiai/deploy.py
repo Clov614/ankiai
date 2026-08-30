@@ -18,7 +18,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 ADDON_NAME = "ankiai"
 KEEP = {"meta.json", "user_files"}
-SKIP_COPY = {"deploy.py", "README.md", "__pycache__", ".git", "user_files"}
+SKIP_COPY = {"deploy.py", "package.py", "README.md", "__pycache__", ".git", "user_files"}
 
 
 def addons21_dir() -> Path:
@@ -26,6 +26,18 @@ def addons21_dir() -> Path:
     if not appdata:
         sys.exit("未找到 APPDATA 环境变量，请在 Windows 上运行")
     return Path(appdata) / "Anki2" / "addons21" / ADDON_NAME
+
+
+def _decode_output(data: bytes) -> str:
+    """子进程输出解码：tasklist 输出跟随系统 ANSI 代码页（中文系统是 GBK）。
+
+    不能用 text=True：在中文 Windows 上 tasklist 的 GBK 字节按 UTF-8 解码
+    会让读取线程抛异常，导致探测静默失效。
+    """
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("gbk", "replace")
 
 
 def anki_running() -> bool:
@@ -36,13 +48,12 @@ def anki_running() -> bool:
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq anki.exe"],
             capture_output=True,
-            text=True,
             timeout=10,
             **_tasklist_no_window(),
         )
     except Exception:
         return False  # 探测失败时不阻塞部署
-    return "anki.exe" in (out.stdout or "").lower()
+    return "anki.exe" in _decode_output(out.stdout or b"").lower()
 
 
 def _tasklist_no_window() -> dict:

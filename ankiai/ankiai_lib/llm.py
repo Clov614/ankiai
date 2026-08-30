@@ -105,6 +105,10 @@ def _post_with_retry(url: str, headers: dict, body: dict, on_delta) -> str:
                 _backoff(attempt)
                 continue
             raise LLMError(f"HTTP {exc.code}：{detail}") from exc
+        except LLMError:
+            # 流中由服务端报告的业务错误（配额、模型名错误等）：原样透传，
+            # 不套"网络请求失败"前缀，也不重试
+            raise
         except Exception as exc:
             if _is_retryable(exc) and attempt < RETRY_TIMES - 1:
                 last = exc
