@@ -18,6 +18,9 @@ EXTRACT_TEMPERATURE = 0.2
 EXTRACT_MIN_MAX_TOKENS = 4096
 MAX_CANDIDATES = 20
 
+# 来源字段里标注 AI 补写的例句（沿用 LanguagePreviewAgentFlow 的惯例）
+AI_EXAMPLE_MARK = "（AI 补句）"
+
 # LLM 需要输出的 9 个字段（“来源”由代码按会话信息填充）
 _LLM_FIELDS = ("单词", "音标", "词性", "中文释义", "CEFR", "原文例句", "例句译文", "AI解析", "词义概述")
 
@@ -43,6 +46,7 @@ class CardCandidate:
     source: str = ""
     analysis: str = ""
     memo: str = ""
+    ai_example: bool = False  # 例句是模型补写的（会话中没有原句）
     is_duplicate: bool = False
 
     def to_note_fields(self) -> dict[str, str]:
@@ -95,6 +99,13 @@ def parse_json_array(text: str) -> list:
     return data
 
 
+def _truthy(value: object) -> bool:
+    """模型的布尔字段可能是 true/"true"/"是" 等多种写法，统一识别。"""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("true", "1", "yes", "y", "是", "真", "补句")
+
+
 def _norm_candidate(obj: object) -> CardCandidate | None:
     """单个 JSON 对象 → 候选；缺单词或释义的丢弃，表达卡统一词性为 phrase。"""
     if not isinstance(obj, dict):
@@ -117,6 +128,7 @@ def _norm_candidate(obj: object) -> CardCandidate | None:
         example_cn=str(obj.get("例句译文") or "").strip(),
         analysis=str(obj.get("AI解析") or "").strip(),
         memo=str(obj.get("词义概述") or "").strip(),
+        ai_example=_truthy(obj.get("AI补句")),
     )
 
 
@@ -151,6 +163,8 @@ def extract_candidates(
             continue
         seen.add(key)
         cand.source = source
+        if cand.ai_example:
+            cand.source = f"{source}{AI_EXAMPLE_MARK}" if source else "AI 补句"
         out.append(cand)
         if len(out) >= MAX_CANDIDATES:
             break

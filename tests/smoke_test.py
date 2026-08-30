@@ -218,13 +218,36 @@ check(
     "抽取提示词含字段与规则",
     all(
         k in prompts.CARD_EXTRACT_PROMPT
-        for k in ("单词", "原文例句", "AI解析", "JSON", "phrase", "固定搭配", "俚语", "习语", "严禁把词条单独包上")
+        for k in ("单词", "原文例句", "AI解析", "JSON", "phrase", "固定搭配", "俚语", "习语", "AI补句", "由你补写")
     ),
 )
 _c2 = cardgen._norm_candidate({"单词": "break a leg", "中文释义": "祝好运", "词性": "俚语"})
 check(
     "俚语/习语归一化为 phrase",
     _c2 is not None and _c2.pos == "phrase" and _c2.phonetic == "",
+)
+_cands3 = cardgen.extract_candidates(
+    [{"role": "user", "content": "x"}],
+    util.DEFAULTS,
+    source="AnkAI 测试",
+    chat_fn=lambda _m, _c: json.dumps(
+        [
+            {"单词": "on cloud nine", "中文释义": "欣喜若狂", "词性": "俚语",
+             "原文例句": 'He was <b class="hl">on cloud nine</b> after the win.',
+             "例句译文": "获胜后他欣喜若狂。", "AI补句": True},
+            {"单词": "from the book", "中文释义": "照书本", "原文例句": "read it <b class=\"hl\">from the book</b>.",
+             "例句译文": "照着书读。", "AI补句": False},
+        ],
+        ensure_ascii=False,
+    ),
+)
+check(
+    "AI补句标记与来源标注",
+    len(_cands3) == 2
+    and _cands3[0].ai_example
+    and _cands3[0].source == "AnkAI 测试（AI 补句）"
+    and not _cands3[1].ai_example
+    and _cands3[1].source == "AnkAI 测试",
 )
 
 # ---- 会话制卡：笔记字段映射 ----
