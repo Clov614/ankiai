@@ -417,6 +417,15 @@ class ExplainPanel(QDockWidget):
     # ---------- 对话控制 ----------
 
     def start_explain(self, text: str, fmt: str) -> None:
+        if self.busy or self._cards_busy:
+            # 生成中重开解释会整体替换 self.messages，旧一轮完成时 _on_done
+            # 会把旧回复追加进新会话并提前解除 busy，必须挡住
+            tooltip(
+                "AnkAI：正在提炼卡片候选，请等它完成再解释"
+                if self._cards_busy
+                else "AnkAI：当前还在生成中，稍后再解释"
+            )
+            return
         cfg = self.addon.get_config()
         self.messages = build_messages(
             text, fmt, custom_prompt=cfg["explain"].get("custom_prompt", "")
