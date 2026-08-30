@@ -89,6 +89,25 @@ def write_config(cfg: dict) -> None:
     mw.addonManager.writeConfig(ADDON_ID, cfg)
 
 
+_version_cache: str | None = None
+
+
+def addon_version() -> str:
+    """manifest.json 的 human_version（读一次后缓存），供 User-Agent 等对外标识使用，
+    避免版本号在代码里再硬编码一份、随发版漂移。"""
+    global _version_cache
+    if _version_cache is None:
+        try:
+            import json
+            from pathlib import Path
+
+            manifest = Path(__file__).resolve().parent.parent / "manifest.json"
+            _version_cache = json.loads(manifest.read_text(encoding="utf-8")).get("human_version") or ""
+        except Exception:
+            _version_cache = ""
+    return _version_cache
+
+
 # 调试日志默认关闭（每次划选/翻卡都写文件太吵）；由启动与设置界面按配置打开
 _debug_log_enabled = False
 _LOG_ROTATE_BYTES = 1_000_000

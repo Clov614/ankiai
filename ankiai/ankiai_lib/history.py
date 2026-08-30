@@ -50,7 +50,10 @@ def load() -> list[dict]:
 
 def _write(records: list[dict]) -> None:
     try:
-        _path().write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
+        # 先写临时文件再原子替换：直接覆写 history.json 时，写一半崩溃/断电会留下截断文件
+        tmp = _path().with_name("history.json.tmp")
+        tmp.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(_path())
     except Exception:
         _log_exc("history.write")
 

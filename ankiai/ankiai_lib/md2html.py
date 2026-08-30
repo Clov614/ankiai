@@ -5,9 +5,21 @@ from __future__ import annotations
 import html
 import re
 
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+
+
+def _link_sub(m: re.Match) -> str:
+    url = m.group(2)
+    if re.match(r"(?i)\s*javascript\s*:", url):
+        return m.group(0)  # 可疑协议不成链，按原文本渲染
+    # _inline 已对全文做过 escape（quote=False）：& < > 已是实体，这里只需补转义引号，
+    # 再 html.escape 会把 &amp; 二次转义成 &amp;amp;
+    return f'<a href="{url.replace(chr(34), "&quot;")}">{m.group(1)}</a>'
+
 
 def _inline(s: str) -> str:
     s = html.escape(s, quote=False)
+    s = _LINK_RE.sub(_link_sub, s)
     s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
     s = re.sub(r"(?<!\*)\*([^*\n]+?)\*(?!\*)", r"<i>\1</i>", s)
     s = re.sub(r"`([^`]+?)`", r"<code>\1</code>", s)
@@ -20,6 +32,7 @@ def md_to_html(md: str) -> str:
     para: list[str] = []
     # (是否有序, 文本)；混合类型时先冲刷，避免渲染错乱
     list_buf: list[tuple[bool, str]] = []
+    quote_buf: list[str] = []  # 连续 > 行合并为一个 blockquote
     in_code = False
     code_buf: list[str] = []
 
@@ -37,6 +50,18 @@ def md_to_html(md: str) -> str:
         out.append(f"<{tag}>{items}</{tag}>")
         list_buf.clear()
 
+    def flush_quote() -> None:
+        if quote_buf:
+            out.append(
+                "<blockquote>" + "<br>".join(_inline(t) for t in quote_buf) + "</blockquote>"
+            )
+            quote_buf.clear()
+
+    def flush_blocks() -> None:
+        flush_para()
+        flush_list()
+        flush_quote()
+
     def push_list_item(ordered: bool, text: str) -> None:
         if list_buf and list_buf[-1][0] != ordered:
             flush_list()
@@ -51,8 +76,7 @@ def md_to_html(md: str) -> str:
                 code_buf.clear()
                 in_code = False
             else:
-                flush_para()
-                flush_list()
+                flush_blocks()
                 in_code = True
             continue
         if in_code:
@@ -60,21 +84,18 @@ def md_to_html(md: str) -> str:
             continue
 
         if not stripped:
-            flush_para()
-            flush_list()
+            flush_blocks()
             continue
 
         m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if m:
-            flush_para()
-            flush_list()
+            flush_blocks()
             level = min(len(m.group(1)), 6)  # 提示词用 ## 小节标题，映射到 h2
             out.append(f"<h{level}>" + _inline(m.group(2)) + f"</h{level}>")
             continue
 
         if re.match(r"^(-{3,}|\*{3,})$", stripped):
-            flush_para()
-            flush_list()
+            flush_blocks()
             out.append("<hr>")
             continue
 
@@ -82,26 +103,26 @@ def md_to_html(md: str) -> str:
         if m:
             flush_para()
             flush_list()
-            out.append("<blockquote>" + _inline(m.group(1)) + "</blockquote>")
+            quote_buf.append(m.group(1))
             continue
 
         m = re.match(r"^(\d+)[.、)．]\s+(.*)$", stripped)
         if m:
-            flush_para()
+            flush_blocks()
             push_list_item(True, m.group(2))
             continue
 
         m = re.match(r"^[-*•]\s+(.*)$", stripped)
         if m:
-            flush_para()
+            flush_blocks()
             push_list_item(False, m.group(1))
             continue
 
         flush_list()
+        flush_quote()
         para.append(stripped)
 
     if in_code and code_buf:
         out.append("<pre>" + html.escape("\n".join(code_buf)) + "</pre>")
-    flush_para()
-    flush_list()
+    flush_blocks()
     return "\n".join(out)

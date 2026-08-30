@@ -13,11 +13,15 @@ import time
 import urllib.error
 import urllib.request
 
-from .util import subprocess_no_window_kwargs as _no_window_kwargs
+from .util import addon_version, subprocess_no_window_kwargs as _no_window_kwargs
 
 RETRY_TIMES = 3
 # 每个 socket 操作的超时：太长会让失败“静默挂住”很久（面板会一直空转）
 REQUEST_TIMEOUT = 60
+
+# python-urllib 的默认 UA 会被部分网关（Cloudflare 1010）整站拦截，需浏览器式 UA
+_ver = addon_version()
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AnkAI" + (f"/{_ver}" if _ver else "")
 
 
 class LLMError(Exception):
@@ -58,8 +62,7 @@ def _post_sse(url: str, headers: dict, body: dict, on_delta, timeout: int) -> st
         method="POST",
         headers={
             "Content-Type": "application/json",
-            # python-urllib 的默认 UA 会被部分网关（Cloudflare 1010）整站拦截
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AnkAI/0.1",
+            "User-Agent": _UA,
             **headers,
         },
     )

@@ -19,6 +19,11 @@ from .util import subprocess_no_window_kwargs as _no_window_kwargs
 MAX_TTS_CHARS = 3000
 RETRY_TIMES = 3
 
+# --list-voices 输出的 Name 列：语言码开头、以 Neural 结尾的整段 token。
+# 不能假设地区段是两个大写字母：存在小写地区变体（zh-CN-liaoning-XiaobeiNeural），
+# 新式 HD 音色还带冒号段（en-US-Ava:DragonHDLatestNeural），故用 \S+ 宽松匹配。
+_VOICE_NAME_RE = re.compile(r"^([a-z]{2,3}-\S+Neural)\b", re.M)
+
 
 class TTSError(Exception):
     pass
@@ -140,8 +145,7 @@ def list_voices(python_cmd: str = "") -> list[str]:
         raise TTSError("获取音色列表超时") from None
     if proc.returncode != 0:
         raise TTSError(proc.stderr.decode("utf-8", "replace")[:200])
-    voices = re.findall(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z]+Neural\b", proc.stdout.decode("utf-8", "replace"), flags=re.M)
-    return sorted(set(voices))
+    return sorted(set(_VOICE_NAME_RE.findall(proc.stdout.decode("utf-8", "replace"))))
 
 
 def _cleanup(p: Path) -> None:

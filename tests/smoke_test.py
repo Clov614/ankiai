@@ -26,6 +26,8 @@ cfg_disk = json.loads((SRC / "config.json").read_text(encoding="utf-8"))
 merged = util.deep_merge(util.DEFAULTS, cfg_disk)
 check("config.json 可解析且与 DEFAULTS 合并", merged["llm"]["provider"] in ("claude-cli", "openai", "anthropic"))
 
+manifest_version = json.loads((SRC / "manifest.json").read_text(encoding="utf-8")).get("human_version", "")
+
 # ---- 语言检测 ----
 cases = {
     "見ていたみたいなの はあるかもしれない": "ja",
@@ -49,6 +51,25 @@ check(
     tts.voice_for("hello", {"tts": {}}) == "en-GB-LibbyNeural",
 )
 
+# ---- 音色名解析（区域变体 / HD 音色）----
+_voices_sample = "\n".join(
+    [
+        "en-GB-LibbyNeural              Female   General",
+        "zh-CN-liaoning-XiaobeiNeural   Female   Regional",
+        "en-US-Ava:DragonHDLatestNeural Female   HD",
+        "Name Gender ContentCategories",  # 表头
+        "voice-not-a-name",
+    ]
+)
+_found = tts._VOICE_NAME_RE.findall(_voices_sample)
+check(
+    "list_voices 正则兼容区域变体与 HD 音色",
+    len(_found) == 3
+    and "en-GB-LibbyNeural" in _found
+    and "zh-CN-liaoning-XiaobeiNeural" in _found
+    and "en-US-Ava:DragonHDLatestNeural" in _found,
+)
+
 # ---- md2html ----
 md = (
     "## 翻译\n\n"
@@ -63,6 +84,13 @@ check("md2html 标题", "<h2>翻译</h2>" in html_out)
 check("md2html 有序列表", "<ol><li><b>日本</b>" in html_out.replace(" ", "") or "<li><b>日本</b>" in html_out)
 check("md2html 粗体", "<b>加粗</b>" in html_out)
 check("md2html 转义", md2html.md_to_html("a < b & c").find("&lt;") > -1)
+check(
+    "md2html 链接渲染与 URL 转义",
+    '<a href="https://e.com/?a=1&amp;b=2">示例</a>' in md2html.md_to_html("[示例](https://e.com/?a=1&b=2)"),
+)
+check("md2html javascript: 不成链", "<a " not in md2html.md_to_html("[x](javascript:alert(1))"))
+_qhtml = md2html.md_to_html("> 第一行\n> 第二行\n\n后续段落")
+check("md2html 连续引用合并", _qhtml.count("<blockquote>") == 1 and "第一行<br>第二行" in _qhtml)
 
 # ---- prompts ----
 msgs = prompts.build_messages("見ていたみたいなの", fmt="mirra")
@@ -80,6 +108,7 @@ from ankiai_lib import llm  # noqa: E402
 
 conv = llm._serialize_conversation(msgs + [{"role": "assistant", "content": "回答"}, {"role": "user", "content": "追问"}])
 check("llm 会话序列化", "【任务说明】" in conv and "【助手】" in conv and "追问" in conv)
+check("llm User-Agent 随 manifest 版本", f"AnkAI/{manifest_version}" in llm._UA)
 
 # ---- llm 流事件解析（错误必须抛出，不能被当心跳吞掉）----
 try:
@@ -121,6 +150,7 @@ check("debug_log 默认关闭", util.DEFAULTS["ui"]["debug_log"] is False)
 check("voice_ru 默认存在", util.DEFAULTS["tts"]["voice_ru"].startswith("ru-RU"))
 merged_cfg = util.deep_merge(util.DEFAULTS, cfg_disk)
 check("config.json 含新键或回退默认", merged_cfg["ui"]["panel_width"] == util.DEFAULTS["ui"]["panel_width"])
+check("addon_version 与 manifest 一致", manifest_version != "" and util.addon_version() == manifest_version)
 
 # ---- LLMError 透传（业务错误不套"网络请求失败"前缀）----
 _orig_post_sse = llm._post_sse

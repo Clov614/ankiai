@@ -18,7 +18,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 ADDON_NAME = "ankiai"
 KEEP = {"meta.json", "user_files"}
-SKIP_COPY = {"deploy.py", "package.py", "README.md", "__pycache__", ".git", "user_files"}
+SKIP_COPY = {"deploy.py", "package.py", "README.md", "docs", "__pycache__", ".git", "user_files"}
 
 
 def addons21_dir() -> Path:

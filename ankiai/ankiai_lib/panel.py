@@ -667,6 +667,8 @@ class ExplainPanel(QDockWidget):
     # ---------- 渲染与状态栏 ----------
 
     def _flush(self) -> None:
+        if not self.isVisible():
+            return  # 隐藏期间不渲染不刷新（10Hz 定时器常驻）；重新显示后的下一 tick 自然补上
         self._update_status()
         if not self._dirty:
             return
