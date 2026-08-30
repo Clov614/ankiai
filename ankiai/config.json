@@ -1,0 +1,34 @@
+{
+  "llm": {
+    "provider": "claude-cli",
+    "claude_cmd": "claude",
+    "claude_model": "",
+    "claude_timeout": 300,
+    "openai_base_url": "https://api.deepseek.com/v1",
+    "openai_api_key": "",
+    "openai_model": "deepseek-chat",
+    "anthropic_api_key": "",
+    "anthropic_model": "claude-sonnet-4-5",
+    "temperature": 0.7,
+    "max_tokens": 3072
+  },
+  "tts": {
+    "python_cmd": "",
+    "rate": "+0%",
+    "voice_en": "en-GB-LibbyNeural",
+    "voice_ja": "ja-JP-NanamiNeural",
+    "voice_zh": "zh-CN-XiaoxiaoNeural",
+    "voice_ko": "ko-KR-SunHiNeural",
+    "voice_ru": "ru-RU-SvetlanaNeural",
+    "fallback_voice": "en-GB-LibbyNeural"
+  },
+  "explain": {
+    "default_format": "mirra",
+    "custom_prompt": ""
+  },
+  "ui": {
+    "panel_width": 560,
+    "panel_height": 640,
+    "debug_log": false
+  }
+}

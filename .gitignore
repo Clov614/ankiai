@@ -1,0 +1,19 @@
+# 本地开发产物
+__pycache__/
+*.pyc
+*.pyo
+
+# 用户运行时数据（历史/语音缓存/日志），绝不发布
+user_files/
+ankiai/user_files/
+meta.json
+
+# 构建产物
+dist/
+
+# 本地工作区元数据（含个人路径与开发计划，不发布）
+.zcode/
+
+# 系统杂项
+Thumbs.db
+.DS_Store
