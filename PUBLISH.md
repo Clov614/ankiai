@@ -2,7 +2,7 @@
 
 ## 0. 安全审查结论（发布前必读，已全部核查通过）
 
-**逐文件人工审查了插件全部 13 个源文件（约 2100 行），未发现敏感信息：**
+**逐文件人工审查了插件全部 18 个源文件（约 3100 行，含 0.2.0 新增的 cardgen/notes/cards_dialog/entemplate 四个模块），未发现敏感信息：**
 
 | 检查项 | 结果 |
 |---|---|
@@ -29,11 +29,11 @@
 ## 2. 已完成的发布准备
 
 - ✅ `manifest.json` 修正为 Anki 官方 schema（原版缺 `package` 字段，双击 .ankiaddon 安装会报错）：
-  `package=ankiai`、`human_version=0.1.0`、`min_point_version=250900`（要求 Anki 25.09+）
+  `package=ankiai`、`human_version`（当前 0.2.0）、`min_point_version=250900`（要求 Anki 25.09+）
 - ✅ 添加 `LICENSE`（AGPL-3.0 —— Anki 本体是 AGPL，AnkiWeb 上架必须选 AGPL 或兼容协议）
 - ✅ `README.md` 增加面向最终用户的「安装」章节与许可说明
 - ✅ `panel.py` 中一处面向私有环境措辞（"网关"）改为通用表述
-- ✅ 安装包已构建并校验：[dist/ankiai-0.1.0.ankiaddon](dist/ankiai-0.1.0.ankiaddon)（44 KB，19 个文件，结构合规）
+- ✅ 安装包已构建并校验：[dist/ankiai-0.2.0.ankiaddon](dist/ankiai-0.2.0.ankiaddon)（约 62 KB，23 个文件，内容与源码逐文件比对一致；0.1.0 旧包仍在 dist/ 供回溯）
 
 ## 3. 路径 A：GitHub 发布（当天可完成）
 
@@ -85,5 +85,24 @@ README 的「方式二」已写好指向 Releases 的链接，用户下载后双
 
 ## 6. 版本记录
 
-- **0.2.0**：会话制卡——解释面板「🎴 生成卡片」把当前对话提炼成 EnWords 卡片（LLM 抽取候选 + 复选 + 任意牌组 + 单词发音 + 查重 + 自动创建 EnWords 笔记类型）；发布前需重新 `python package.py` 打包（新模块 cardgen/notes/cards_dialog/entemplate 走 glob 自动进包）
+- **0.2.0**：会话制卡——解释面板「🎴 生成卡片」把当前对话提炼成 EnWords 卡片（LLM 抽取候选 + 复选 + 任意牌组 + 单词发音 + 查重 + 自动创建 EnWords 笔记类型）；已重新 `python package.py` 打包（新模块 cardgen/notes/cards_dialog/entemplate 走 glob 自动进包）
 - **0.1.0**：首发（划选 AI 解释 + 多轮追问 + Edge TTS 朗读）
+
+## 7. GIF 动图演示（进阶，待 0.2.0 稳定后录）
+
+**工具**：ScreenToGif（免费开源，Windows）——`winget install ScreenToGif`，或从 [GitHub Releases](https://github.com/NickeManarin/ScreenToGif/releases) 下载便携版免安装。
+
+**录制脚本**（短而聚焦，每个 8-12 秒效果最好）：
+
+| GIF | 内容 | 目标文件 |
+|---|---|---|
+| 1 核心流程 | 复习界面 → 划选句子 → 右键 → 点「AI 解释」→ 面板流式输出 | `ankiai/docs/images/demo-explain.gif` |
+| 2 追问 | 面板里划选一句 → 点「引用」→ 输入追问 → Enter → 流式回答 | `ankiai/docs/images/demo-followup.gif` |
+| 3 制卡（0.2.0） | 「生成卡片」→ 候选勾选 → 添加到牌组 | `ankiai/docs/images/demo-cardgen.gif` |
+
+**录制参数**：15 fps；用"窗口/区域"模式只框住 Anki 相关区域；录完在编辑器里裁掉首尾冗余帧。
+
+**导出**：GIF 超过 3MB 就降到 12 fps / 宽度 800px；或改录 MP4 后拖到任一 GitHub issue 的评论框，右键复制生成的 CDN 链接直接内嵌 README（体积小、清晰度高，推荐）。
+
+**接入 README**：文件放进 `ankiai/docs/images/` 后说一声，把根 README 顶部主图换成 GIF（或插到「截图预览」第一张）并提交推送。
+
