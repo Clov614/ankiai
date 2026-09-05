@@ -67,3 +67,5 @@ def add_actions(addon, webview, menu) -> None:
     menu.addSeparator()
     act_conf = menu.addAction("⚙ AnkAI 设置…")
     qconnect(act_conf.triggered, addon.open_settings)
+    act_stats = menu.addAction("📊 AnkAI Token 统计…")
+    qconnect(act_stats.triggered, addon.open_stats)

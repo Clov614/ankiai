@@ -29,11 +29,11 @@
 ## 2. 已完成的发布准备
 
 - ✅ `manifest.json` 修正为 Anki 官方 schema（原版缺 `package` 字段，双击 .ankiaddon 安装会报错）：
-  `package=ankiai`、`human_version`（当前 0.2.1）、`min_point_version=250900`（要求 Anki 25.09+）
+  `package=ankiai`、`human_version`（当前 0.2.2）、`min_point_version=250900`（要求 Anki 25.09+）
 - ✅ 添加 `LICENSE`（AGPL-3.0 —— Anki 本体是 AGPL，AnkiWeb 上架必须选 AGPL 或兼容协议）
 - ✅ `README.md` 增加面向最终用户的「安装」章节与许可说明
 - ✅ `panel.py` 中一处面向私有环境措辞（"网关"）改为通用表述
-- ✅ 安装包已构建并校验：[dist/ankiai-0.2.1.ankiaddon](dist/ankiai-0.2.1.ankiaddon)（约 63 KB，23 个文件，内容与源码逐文件比对一致）；0.2.0 已发布于 GitHub Releases（2026-08-31），历史包留在 dist/ 供回溯
+- ✅ 安装包已构建并校验：[dist/ankiai-0.2.2.ankiaddon](dist/ankiai-0.2.2.ankiaddon)（内容与源码逐文件比对一致）；0.2.1 及更早已发布于 GitHub Releases，历史包留在 dist/ 供回溯
 
 ## 3. 路径 A：GitHub 发布（当天可完成）
 
@@ -94,7 +94,14 @@ README 的「方式二」已写好指向 Releases 的链接，用户下载后双
 
 ## 6. 版本记录
 
-- **0.2.1**（已打包，待发 Release）：小修与清理——解释历史写入改原子替换（防截断）；音色列表兼容区域变体与 HD 音色（`zh-CN-liaoning-*`、`*:DragonHD*`）；HTTP User-Agent 版本号自动取自 manifest（不再硬编码）；md2html 支持 Markdown 链接（拦截 `javascript:`）并合并连续引用行；deploy 不再拷贝 docs/；解释面板隐藏时跳过渲染刷新；新增 `.gitattributes` 统一 LF
+- **0.2.2**（2026-09-05）：小窗口适配与设置体验——
+  - **解释面板小窗自适应**：底部按钮条按面板宽度自动折行（宽窗单行与旧版一致，窄窗自动排成 2~3 行，全部按钮完整可见可点，空行不占高度）；输入行窄窗折两行（输入框独占整行不挤压，引用/发送在下一行左右分布）；内容区 `pre` 代码块 `white-space: pre-wrap` + 长单词/URL 强制断行（`WrapAtWordBoundaryOrAnywhere`）。修复小窗口下 Dock 最小宽度被单行按钮条撑爆、整个面板被 Anki 主窗口裁掉（生成卡片/历史/统计/发送按钮不可见）的问题。涉及 panel.py（`_reflow_btn_bar`/`_reflow_input_row` + resizeEvent/showEvent）
+  - **设置新增「面板字号」下拉**（界面与其他组）：默认（跟随 Anki）/ 12~28px 预设档位，内容区正文、章节标题（+2px）、追问输入框即时生效（保存后 `apply_font_config` 同步，无需重启）；配置存非预设值时自动补一项显示。涉及 settings.py/panel.py/hooks.py/util.py/config.json/config.md
+  - **设置页滚轮防误触**：全部下拉框与数字框（接口类型/语速/五个音色/解释格式/面板宽高/字号等）未聚焦时忽略滚轮——事件上抛给外层滚动区只滚页面，不再误改光标下方控件；点击/Tab 聚焦后滚轮仍可调值。关键点：可编辑下拉框与数字框内部行编辑器默认带 `WheelFocus`（滚轮会先抢焦点再冒泡改值），已一并改为 `StrongFocus`。新增 `_NoWheelComboBox`/`_NoWheelSpinBox`
+  - **设置对话框**：五组设置包进纵向滚动区（正常高度无滚动条、外观不变；窗口压矮时 Save/Cancel 始终可达）；制卡/统计页长提示文案补自动换行
+  - **Token 用量统计 + 实时反馈**：① LLM 层解析流式响应 `usage`（OpenAI `prompt/completion`、Anthropic `input/output + cache_*`），每次解释/追问/制卡完成后落盘到 `user_files/token_usage.json`（原子写、坏文件备份恢复，上限 2 万条）；② 新增「📊 统计」面板（解释面板按钮 + 右键菜单 + 工具菜单三入口）：今日/本周/本月/本年 token 与请求数摘要卡、近 7 天/30 天/本年按月柱状图（QPainter 自绘，无图表依赖）、按功能/按模型明细表，深浅主题适配；③ 解释/追问状态栏实时显示 `↑输入↓输出` token 计数（usage 事件到达即刷新）；④ 制卡改为流式接收，状态行实时显示「已接收 N 字 · 用时」，完成后显示「✅ 已提炼 N 张 · 用时 · tokens」；⑤ 制卡「添加到牌组」的单词发音合成改为并发（`ui.stats_audio_workers`，默认 4 路，约 4 倍提速，批量合成时显示进度 x/y）。涉及 llm/cardgen/panel/cards_dialog/hooks/menu/util/token_usage（新）/stats_dialog（新），`smoke_test.py` 新增 usage 解析、聚合、SVG 生成等回归用例
+  - 修复 Edge TTS 朗读在语速设为负值（`-20%`/`-10%` 预设）时全部朗读失败的问题——根因是合成命令把语速作为独立 argv 传入（`"--rate", "-20%"`），`-` 开头的值被 edge-tts 的 argparse 误判为未知选项而报 usage 错误；已改为 `--opt=value` 形式（`--rate=-20%`）并抽出 `tts.build_synth_command()` 纯函数，`tests/smoke_test.py` 新增对应回归用例
+- **0.2.1**（已发 Release）：小修与清理——解释历史写入改原子替换（防截断）；音色列表兼容区域变体与 HD 音色（`zh-CN-liaoning-*`、`*:DragonHD*`）；HTTP User-Agent 版本号自动取自 manifest（不再硬编码）；md2html 支持 Markdown 链接（拦截 `javascript:`）并合并连续引用行；deploy 不再拷贝 docs/；解释面板隐藏时跳过渲染刷新；新增 `.gitattributes` 统一 LF
 - **0.2.0**：会话制卡——解释面板「🎴 生成卡片」把当前对话提炼成 EnWords 卡片（LLM 抽取候选 + 复选 + 任意牌组 + 单词发音 + 查重 + 自动创建 EnWords 笔记类型）；已重新 `python package.py` 打包（新模块 cardgen/notes/cards_dialog/entemplate 走 glob 自动进包）
 - **0.1.0**：首发（划选 AI 解释 + 多轮追问 + Edge TTS 朗读）
 

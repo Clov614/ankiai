@@ -60,6 +60,21 @@ def voice_for(text: str, cfg: dict) -> str:
     return t.get(f"voice_{lang}") or t.get("fallback_voice") or "en-GB-LibbyNeural"
 
 
+def build_synth_command(python: str, voice: str, text: str, rate: str, out: Path) -> list[str]:
+    """构造 edge-tts 合成命令。
+
+    参数统一用 --opt=value 形式：argparse 只会把它当作该选项的值；
+    否则以 - 开头的值（如语速 -20%）会被误判为未知选项而报 usage 错误。
+    """
+    return [
+        python, "-m", "edge_tts",
+        f"--voice={voice}",
+        f"--text={text}",
+        f"--rate={rate}",
+        f"--write-media={out}",
+    ]
+
+
 def synth(text: str, cfg: dict) -> Path:
     """合成（或命中缓存）并返回 mp3 路径。"""
     text = " ".join(text.split())[:MAX_TTS_CHARS]
@@ -80,13 +95,7 @@ def synth(text: str, cfg: dict) -> Path:
     for attempt in range(RETRY_TIMES):
         try:
             proc = subprocess.run(
-                [
-                    python, "-m", "edge_tts",
-                    "--voice", voice,
-                    "--text", text,
-                    "--rate", rate,
-                    "--write-media", str(tmp),
-                ],
+                build_synth_command(python, voice, text, rate, tmp),
                 capture_output=True,
                 timeout=120,
                 **_no_window_kwargs(),

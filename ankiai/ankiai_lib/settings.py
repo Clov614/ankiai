@@ -7,19 +7,24 @@
 from __future__ import annotations
 
 from aqt.qt import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
+    Qt,
     QVBoxLayout,
+    QWidget,
     qconnect,
 )
 
@@ -36,6 +41,8 @@ FORMAT_LABELS = [
     ("sentence", "例句解析（逐项/整句/文化/钩子）"),
 ]
 RATE_PRESETS = ["-20%", "-10%", "+0%", "+10%", "+15%", "+20%", "+30%"]
+# 面板字号下拉预设（px）；0 = 跟随 Anki 默认，单独作为首项
+_FONT_CHOICES = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 28]
 
 # 常见音色的友好标签；未收录的音色显示原始名
 VOICE_LABELS = {
@@ -71,8 +78,52 @@ _LANG_SUFFIX = {
 }
 
 
+def _focus_within(w: QWidget) -> bool:
+    """焦点是否在控件自身或其子控件上（QSpinBox 内含行编辑器）。"""
+    fw = QApplication.focusWidget()
+    return fw is not None and (fw is w or w.isAncestorOf(fw))
+
+
+class _NoWheelComboBox(QComboBox):
+    """未聚焦时忽略滚轮：滚轮事件上抛给外层滚动区去滚动页面，
+    避免滚动设置页时顺手改掉了光标下方的下拉框选项。点击/Tab 聚焦后滚轮仍可换值。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def setEditable(self, editable: bool) -> None:
+        super().setEditable(editable)
+        # 可编辑下拉框的内部行编辑器默认带 WheelFocus：滚轮会先给它抢焦点、
+        # 再把事件冒泡回组合框改值，必须一并去掉 wheel 抢焦点
+        if editable and self.lineEdit() is not None:
+            self.lineEdit().setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:
+        if _focus_within(self):
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class _NoWheelSpinBox(QSpinBox):
+    """同 _NoWheelComboBox：未聚焦时滚轮不改数值，只滚动页面。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        if self.lineEdit() is not None:  # 内部行编辑器同样禁止滚轮抢焦点
+            self.lineEdit().setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:
+        if _focus_within(self):
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
 def _combo(options: list[tuple[str, str]], current: str) -> QComboBox:
-    box = QComboBox()
+    box = _NoWheelComboBox()
     for value, label in options:
         box.addItem(label, value)
     idx = box.findData(current)
@@ -98,14 +149,25 @@ class SettingsDialog(QDialog):
         self.cfg = get_config_safe()
 
         lay = QVBoxLayout(self)
-        lay.addWidget(self._llm_group())
-        lay.addWidget(self._tts_group())
-        lay.addWidget(self._explain_group())
-        lay.addWidget(self._cards_group())
-        lay.addWidget(self._ui_group())
+        # 五组设置包进滚动区：正常窗口高度下不出现滚动条（视觉不变），
+        # 窗口被压矮时内容可滚动，保证底部 Save/Cancel 始终可达
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        inner_lay = QVBoxLayout(inner)
+        inner_lay.addWidget(self._llm_group())
+        inner_lay.addWidget(self._tts_group())
+        inner_lay.addWidget(self._explain_group())
+        inner_lay.addWidget(self._cards_group())
+        inner_lay.addWidget(self._ui_group())
+        inner_lay.addStretch(1)
+        scroll.setWidget(inner)
+        lay.addWidget(scroll, 1)
 
         footer = QHBoxLayout()
         hint = QLabel("API Key 仅保存在本机 Anki 插件配置中；也支持 OPENAI_API_KEY / ANTHROPIC_API_KEY 环境变量")
+        hint.setWordWrap(True)
         hint.setStyleSheet("color: gray;")
         footer.addWidget(hint, 1)
         btns = QDialogButtonBox(
@@ -151,7 +213,7 @@ class SettingsDialog(QDialog):
         self.tts_python.setPlaceholderText("留空自动探测系统 Python")
         form.addRow("Python 路径", self.tts_python)
 
-        self.rate = QComboBox()
+        self.rate = _NoWheelComboBox()
         self.rate.setEditable(True)
         for preset in RATE_PRESETS:
             self.rate.addItem(preset)
@@ -178,7 +240,7 @@ class SettingsDialog(QDialog):
         return g
 
     def _voice_combo(self) -> QComboBox:
-        box = QComboBox()
+        box = _NoWheelComboBox()
         for name in self._curated_voices():
             box.addItem(_voice_display(name), name)
         box.setCurrentIndex(-1)
@@ -216,14 +278,20 @@ class SettingsDialog(QDialog):
     def _ui_group(self) -> QGroupBox:
         g = QGroupBox("界面与其他")
         form = QFormLayout(g)
-        self.panel_width = QSpinBox()
+        self.panel_width = _NoWheelSpinBox()
         self.panel_width.setRange(320, 1600)
         self.panel_width.setSuffix(" px")
         form.addRow("面板宽度", self.panel_width)
-        self.panel_height = QSpinBox()
+        self.panel_height = _NoWheelSpinBox()
         self.panel_height.setRange(400, 1600)
         self.panel_height.setSuffix(" px")
         form.addRow("面板高度", self.panel_height)
+        self.panel_font = _NoWheelComboBox()
+        self.panel_font.addItem("默认（跟随 Anki）", 0)
+        for v in _FONT_CHOICES:
+            self.panel_font.addItem(f"{v} px", v)
+        self.panel_font.setToolTip("解释面板内容区与输入框的字号；选默认则跟随 Anki")
+        form.addRow("面板字号", self.panel_font)
         self.debug_log = QCheckBox("写调试日志到 user_files\\ankiai.log（排查问题时打开）")
         form.addRow("", self.debug_log)
         return g
@@ -257,6 +325,12 @@ class SettingsDialog(QDialog):
         ui = self.cfg["ui"]
         self.panel_width.setValue(int(ui.get("panel_width", 560)))
         self.panel_height.setValue(int(ui.get("panel_height", 640)))
+        _size = int(ui.get("panel_font_size", 0))
+        _fidx = self.panel_font.findData(_size)
+        if _fidx < 0:  # 配置里是非预设值：临时补一项，保证显示与保存一致
+            self.panel_font.addItem(f"{_size} px", _size)
+            _fidx = self.panel_font.count() - 1
+        self.panel_font.setCurrentIndex(_fidx)
         self.debug_log.setChecked(bool(ui.get("debug_log", False)))
 
     def _voice_combos(self) -> list[tuple[QComboBox, str]]:
@@ -349,6 +423,7 @@ class SettingsDialog(QDialog):
 
         cfg["ui"]["panel_width"] = self.panel_width.value()
         cfg["ui"]["panel_height"] = self.panel_height.value()
+        cfg["ui"]["panel_font_size"] = int(self.panel_font.currentData())
         cfg["ui"]["debug_log"] = self.debug_log.isChecked()
         set_debug_logging(cfg["ui"]["debug_log"])  # 立即生效，无需重启
 

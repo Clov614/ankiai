@@ -10,6 +10,7 @@ SRC = Path(__file__).resolve().parent.parent / "ankiai"
 sys.path.insert(0, str(SRC))
 
 from ankiai_lib import langdetect, md2html, prompts, tts, util  # noqa: E402
+from ankiai_lib import token_usage  # noqa: E402
 
 failures = []
 
@@ -69,6 +70,19 @@ check(
     and "zh-CN-liaoning-XiaobeiNeural" in _found
     and "en-US-Ava:DragonHDLatestNeural" in _found,
 )
+
+# ---- edge-tts 合成命令构建（负语速 -20% 不得被 argparse 当作未知选项）----
+_cmd = tts.build_synth_command("python", "en-GB-LibbyNeural", "hello", "-20%", Path("out.mp3"))
+check(
+    "synth 命令用 --opt=value 形式（负语速不歧义）",
+    "--rate=-20%" in _cmd
+    and "-20%" not in _cmd  # 不允许 ["--rate", "-20%"] 的旧形态
+    and "--voice=en-GB-LibbyNeural" in _cmd
+    and "--text=hello" in _cmd
+    and "--write-media=out.mp3" in _cmd,
+)
+_cmd0 = tts.build_synth_command("python", "v", "t", "+0%", Path("o.mp3"))
+check("默认语速 +0% 同样为 --rate=+0%", "--rate=+0%" in _cmd0 and "+0%" not in _cmd0)
 
 # ---- md2html ----
 md = (
@@ -159,7 +173,6 @@ _orig_post_sse = llm._post_sse
 def _raise_llm_error(*_args, **_kwargs):
     raise llm.LLMError("配额不足")
 
-
 llm._post_sse = _raise_llm_error
 try:
     llm._post_with_retry("http://example.invalid", {}, {}, None)
@@ -173,7 +186,7 @@ finally:
 _calls = {"n": 0}
 
 
-def _flaky_post_sse(_url, _headers, _body, _on_delta, _timeout):
+def _flaky_post_sse(_url, _headers, _body, _on_delta, _timeout, **_kw):
     _calls["n"] += 1
     if _calls["n"] == 1:
         raise ConnectionError("connection reset")
@@ -216,7 +229,7 @@ for label, raw in (
     ("围栏包裹", f"```json\n{_ARRAY}\n```"),
     ("前后带说明", f"好的，以下是卡片：\n{_ARRAY}\n以上就是全部内容。"),
 ):
-    cands = cardgen.extract_candidates(
+    cands, _usage = cardgen.extract_candidates(
         [{"role": "user", "content": "x"}], util.DEFAULTS, source="AnkAI 测试",
         chat_fn=lambda _m, _c, _raw=raw: _raw,
     )
@@ -256,7 +269,7 @@ check(
     "俚语/习语归一化为 phrase",
     _c2 is not None and _c2.pos == "phrase" and _c2.phonetic == "",
 )
-_cands3 = cardgen.extract_candidates(
+_cands3, _usage3 = cardgen.extract_candidates(
     [{"role": "user", "content": "x"}],
     util.DEFAULTS,
     source="AnkAI 测试",
@@ -279,6 +292,40 @@ check(
     and not _cands3[1].ai_example
     and _cands3[1].source == "AnkAI 测试",
 )
+check(
+    "chat_fn 返回元组时也能解出 usage",
+    _usage3 is None,  # chat_fn 注入路径无 usage（真实 LLM 通道才有）
+)
+
+# ---- 会话制卡：on_usage 透传给 llm.chat（供 UI 实时显示 token）----
+_captured = {"on_usage": None}
+_usage_fake = {"prompt_tokens": 10, "completion_tokens": 20, "cached_tokens": 0}
+_orig_chat = cardgen.llm.chat
+
+
+def _fake_chat(_messages, _cfg, on_delta=None, on_usage=None):
+    _captured["on_usage"] = on_usage
+    if on_usage:
+        on_usage(_usage_fake)
+    return ('[{"单词": "abc", "中文释义": "测试"}]', _usage_fake)
+
+
+cardgen.llm.chat = _fake_chat
+try:
+    _my_cb = lambda _u: None
+    _c4, _u4 = cardgen.extract_candidates(
+        [{"role": "user", "content": "x"}], util.DEFAULTS,
+        source="AnkAI 测试", on_usage=_my_cb,
+    )
+    check(
+        "制卡 on_usage 透传并带出 usage",
+        _captured["on_usage"] is _my_cb  # 回调被原样透传给 llm.chat
+        and _u4 == _usage_fake
+        and len(_c4) == 1
+        and _c4[0].word == "abc",
+    )
+finally:
+    cardgen.llm.chat = _orig_chat
 
 # ---- 会话制卡：笔记字段映射 ----
 _cand = cardgen.CardCandidate(word="decidedly", meaning="果断地", source="AnkAI")
@@ -297,6 +344,160 @@ check(
 )
 check("deploy UTF-8 输出解码", "anki.exe" in deploy._decode_output(b"Image Name: anki.exe"))
 check("anki_running 返回布尔", isinstance(deploy.anki_running(), bool))
+
+# ---- Token 用量：流式 usage 解析 ----
+_oai_usage = llm._extract_usage(
+    {"usage": {"prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200}}
+)
+check(
+    "OpenAI 风格 usage 解析",
+    _oai_usage is not None
+    and _oai_usage["prompt_tokens"] == 120
+    and _oai_usage["completion_tokens"] == 80
+    and _oai_usage["total_tokens"] == 200
+    and _oai_usage["cached_tokens"] == 0,
+)
+_anthropic_usage = llm._extract_usage(
+    {
+        "type": "message_delta",
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_creation_input_tokens": 30,
+            "cache_read_input_tokens": 20,
+        },
+    }
+)
+check(
+    "Anthropic 风格 usage 解析（cache 独立累加）",
+    _anthropic_usage is not None
+    and _anthropic_usage["prompt_tokens"] == 100
+    and _anthropic_usage["completion_tokens"] == 50
+    and _anthropic_usage["cached_tokens"] == 50
+    and _anthropic_usage["total_tokens"] == 200,
+)
+check(
+    "无 usage 字段返回 None",
+    llm._extract_usage({"choices": [{"delta": {"content": "hi"}}]}) is None,
+)
+
+# ---- chat_result 兼容层（丢弃 usage 返回纯文本）----
+_calls = {"n": 0}
+_orig_post_sse = llm._post_sse
+
+
+def _usage_post_sse(_url, _headers, _body, _on_delta, _timeout, **_kw):
+    _calls["n"] += 1
+    return "ok 文本", {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+
+
+llm._post_sse = _usage_post_sse
+try:
+    _openai_cfg = util.deep_merge(
+        util.DEFAULTS,
+        {"llm": {"provider": "openai", "openai_base_url": "https://example.invalid/v1",
+                 "openai_api_key": "test-key", "openai_model": "test-model"}},
+    )
+    _text = llm.chat_result([{"role": "user", "content": "hi"}], _openai_cfg)
+    check("chat_result 返回纯文本", _text == "ok 文本")
+    _text2, _usage2 = llm.chat([{"role": "user", "content": "hi"}], _openai_cfg)
+    check(
+        "chat 返回 (text, usage) 元组",
+        _text2 == "ok 文本" and _usage2["total_tokens"] == 15,
+    )
+finally:
+    llm._post_sse = _orig_post_sse
+
+# ---- Token 用量：周期聚合（用注入 records，与运行日期无关）----
+import datetime as _dt  # noqa: E402
+
+
+def _ts(d: _dt.date) -> float:
+    return _dt.datetime(d.year, d.month, d.day, 12, 0).timestamp()
+
+
+_today = _dt.date.today()
+_monday = _today - _dt.timedelta(days=_today.weekday())
+_last_month = (_today.replace(day=1) - _dt.timedelta(days=1)).replace(day=1)
+_last_year = _today.replace(year=_today.year - 1)
+
+_recs = [
+    {"ts": _ts(_today), "provider": "openai", "model": "m1", "feature": "explain",
+     "prompt_tokens": 100, "completion_tokens": 50, "cached_tokens": 0, "request_ms": 1000},
+    {"ts": _ts(_today), "provider": "openai", "model": "m1", "feature": "followup",
+     "prompt_tokens": 200, "completion_tokens": 100, "cached_tokens": 0, "request_ms": 2000},
+    {"ts": _ts(_monday), "provider": "anthropic", "model": "a1", "feature": "cards",
+     "prompt_tokens": 300, "completion_tokens": 150, "cached_tokens": 50, "request_ms": 3000},
+    {"ts": _ts(_last_month), "provider": "openai", "model": "m1", "feature": "explain",
+     "prompt_tokens": 400, "completion_tokens": 200, "cached_tokens": 0, "request_ms": 1000},
+    {"ts": _ts(_last_year), "provider": "openai", "model": "m1", "feature": "explain",
+     "prompt_tokens": 800, "completion_tokens": 400, "cached_tokens": 0, "request_ms": 1000},
+]
+_sums = token_usage.summaries(_recs)
+# 今天恰是周一时，本周一与今天重合：cards 记录（500）计入今日
+_monday_is_today = _monday == _today
+_today_tokens = 450 + (500 if _monday_is_today else 0)
+_today_req = 2 + (1 if _monday_is_today else 0)
+# cards 记录在本周内（本周一或今天），本周恒为 950
+check(
+    "今日摘要",
+    _sums["today"]["tokens"] == _today_tokens
+    and _sums["today"]["requests"] == _today_req,
+)
+check(
+    "本周摘要（含周一制卡）",
+    _sums["week"]["tokens"] == 950 and _sums["week"]["requests"] == 3,
+)
+# 上月记录是否属本月/本年取决于当前月份（月初第一周时本周一可能落在上月）
+_month_extra = 500 if _monday.month == _today.month else 0
+check("本月摘要", _sums["month"]["tokens"] == 450 + _month_extra)
+# 本周一与上月记录各自按「是否在本年」计入本年摘要（去年记录不计）
+_year_expected = (
+    450
+    + (500 if _monday.year == _today.year else 0)
+    + (600 if _last_month.year == _today.year else 0)
+)
+check("本年摘要（不含去年）", _sums["year"]["tokens"] == _year_expected)
+_s7 = token_usage.series_by_day(_recs, days=7)
+check(
+    "近7天序列长度与统计",
+    len(_s7) == 7
+    and _s7[-1]["tokens"] == _today_tokens
+    and _s7[-1]["requests"] == _today_req,
+)
+if _today.month == 1:
+    _prev_year_series = token_usage.series_by_month(_recs, year=_last_year.year)
+    check(
+        "上年逐月汇总（仅去年那笔）",
+        sum(s["tokens"] for s in _prev_year_series) == 1200,
+    )
+_by_feat = token_usage.by_feature(_recs, period="all")
+_feat_map = {f["label"]: f for f in _by_feat}
+check(
+    "按功能分组（all 不过滤日期）",
+    len(_by_feat) == 3
+    and _feat_map["AI 解释"]["tokens"] == 1950
+    and _feat_map["追问"]["tokens"] == 300
+    and _feat_map["制卡"]["tokens"] == 500,
+)
+_by_model = token_usage.by_model(_recs, period="all")
+check(
+    "按模型分组",
+    len(_by_model) == 2
+    and _by_model[0]["label"] == "openai · m1"
+    and _by_model[1]["label"] == "anthropic · a1",
+)
+
+# ---- Token 用量：SVG 柱状图纯函数 ----
+_svg = token_usage.bar_chart_svg(["一", "二", "三"], [100, 200, 0])
+check(
+    "SVG 柱状图生成",
+    _svg.startswith("<svg")
+    and "<rect" in _svg
+    and "viewBox" in _svg,
+)
+_svg_bad = token_usage.bar_chart_svg(["一", "二"], [1, 2, 3])
+check("SVG 参数不匹配返回空图", "<rect" not in _svg_bad and "<svg" in _svg_bad)
 
 print()
 if failures:

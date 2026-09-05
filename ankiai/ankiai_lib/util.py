@@ -62,7 +62,13 @@ DEFAULTS: dict = {
         "default_tags": "ankiai",
         "attach_word_audio": True,  # 制卡时用 edge-tts 附单词发音
     },
-    "ui": {"panel_width": 560, "panel_height": 640, "debug_log": False},
+    "ui": {
+        "panel_width": 560,
+        "panel_height": 640,
+        "panel_font_size": 0,  # 解释面板内容字号（px）；0 = 跟随 Anki 默认
+        "debug_log": False,
+        "stats_audio_workers": 4,  # 制卡附加发音时的并发合成路数（edge-tts 子进程）
+    },
 }
 
 

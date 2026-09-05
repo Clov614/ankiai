@@ -137,8 +137,15 @@ def extract_candidates(
     cfg: dict,
     source: str = "",
     chat_fn=None,
-) -> list[CardCandidate]:
-    """从会话中提炼卡片候选。chat_fn 仅测试注入用。"""
+    on_delta=None,
+    on_usage=None,
+) -> tuple[list[CardCandidate], dict | None]:
+    """从会话中提炼卡片候选。chat_fn 仅测试注入用。
+
+    返回 (candidates, usage)：usage 为真实 LLM 通道的用量 dict 或 None
+    （chat_fn 注入路径或 claude-cli 无 usage）。on_delta / on_usage 透传给
+    llm.chat，供 UI 在流式阶段显示进度与实时 token 计数。
+    """
     if not messages:
         raise CardGenError("当前会话还没有内容")
     call_cfg = deepcopy(cfg)
@@ -149,7 +156,12 @@ def extract_candidates(
         {"role": "system", "content": CARD_EXTRACT_PROMPT},
         {"role": "user", "content": f"【会话记录】\n{_transcript(messages)}\n【会话结束】"},
     ]
-    raw = (chat_fn or llm.chat)(llm_msgs, call_cfg)
+    usage: dict | None = None
+    if chat_fn is not None:
+        result = chat_fn(llm_msgs, call_cfg)
+        raw = result[0] if isinstance(result, tuple) else result
+    else:
+        raw, usage = llm.chat(llm_msgs, call_cfg, on_delta, on_usage=on_usage)
     data = parse_json_array(raw)
 
     out: list[CardCandidate] = []
@@ -170,4 +182,4 @@ def extract_candidates(
             break
     if not out:
         raise CardGenError("没有从会话中提炼出可制卡的词条")
-    return out
+    return out, usage

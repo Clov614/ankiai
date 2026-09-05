@@ -52,4 +52,10 @@ API Key 也可用环境变量 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MOD
 | 键 | 说明 |
 |---|---|
 | `panel_width` / `panel_height` | 解释面板的初始尺寸（px，最小 320×400），设置界面可调 |
+| `panel_font_size` | 解释面板内容区与输入框的字号，设置界面下拉可选（px；默认 = 跟随 Anki），保存后立即生效 |
 | `debug_log` | `true` 时把调试日志写入 `user_files/ankiai.log`（排查问题用；文件超 1MB 自动轮转为 `.old`） |
+| `stats_audio_workers` | 制卡「添加到牌组」时并发合成单词发音的路数（edge-tts 子进程，默认 4；网络慢时可调小） |
+
+## Token 用量统计
+
+每次 LLM 请求完成后（AI 解释 / 追问 / 会话制卡），插件会把用量记录写入 `user_files/token_usage.json`（含提供方、模型、功能、输入/输出 token、请求耗时；只记真实 API 通道能返回 usage 的请求，claude-cli 与失败的请求不计）。右键菜单或面板按钮「📊 统计」打开用量面板：今日 / 本周 / 本月 / 本年的 token 与请求数摘要、近 7 天 / 30 天 / 本年的柱状图，以及按功能、按模型的明细。

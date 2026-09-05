@@ -1,6 +1,10 @@
 """LLM 调用：claude-cli 子进程 / OpenAI 兼容 SSE / Anthropic SSE。纯标准库，后台线程调用。
 
 流式约定：on_delta(None) 表示「重置当前轮缓冲」（重试前调用）；on_delta(str) 为增量。
+
+返回约定：chat_openai / chat_anthropic / chat_claude_cli / chat 均返回
+(text, usage) 元组；usage 为 dict 或 None（无 usage 信息的通道，如 claude-cli）。
+需要纯文本的旧调用方用 chat_result()。
 """
 
 from __future__ import annotations
@@ -55,7 +59,44 @@ def _extract_delta(obj: dict) -> str:
     return ""
 
 
-def _post_sse(url: str, headers: dict, body: dict, on_delta, timeout: int) -> str:
+def _extract_usage(obj: dict) -> dict | None:
+    """从流式事件里提取用量信息。
+
+    - OpenAI 风格：{"usage": {"prompt_tokens", "completion_tokens", "total_tokens", ...}}
+      cached_tokens（prompt_tokens_details）已含在 prompt_tokens 内，记 0 避免重复计数。
+    - Anthropic 风格：{"usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", ...}}
+      cache_* 是独立字段，未计入 input_tokens，需单独累加。
+    """
+    u = obj.get("usage")
+    if not isinstance(u, dict):
+        return None
+    if "prompt_tokens" in u or "total_tokens" in u:
+        prompt = int(u.get("prompt_tokens") or 0)
+        completion = int(u.get("completion_tokens") or 0)
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": int(u.get("total_tokens") or (prompt + completion)),
+            "cached_tokens": 0,  # OpenAI 的 cached 是 prompt_tokens 的子集
+        }
+    if "input_tokens" in u or "output_tokens" in u:
+        input_tok = int(u.get("input_tokens") or 0)
+        output_tok = int(u.get("output_tokens") or 0)
+        cached = int(u.get("cache_creation_input_tokens") or 0) + int(
+            u.get("cache_read_input_tokens") or 0
+        )
+        return {
+            "prompt_tokens": input_tok,
+            "completion_tokens": output_tok,
+            "total_tokens": input_tok + output_tok + cached,
+            "cached_tokens": cached,
+        }
+    return None
+
+
+def _post_sse(
+    url: str, headers: dict, body: dict, on_delta, timeout: int, on_usage=None
+) -> tuple[str, dict | None]:
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -67,6 +108,7 @@ def _post_sse(url: str, headers: dict, body: dict, on_delta, timeout: int) -> st
         },
     )
     chunks: list[str] = []
+    usage: dict | None = None
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         for raw in resp:
             line = raw.decode("utf-8", "replace").strip()
@@ -79,6 +121,13 @@ def _post_sse(url: str, headers: dict, body: dict, on_delta, timeout: int) -> st
                 obj = json.loads(data)
             except json.JSONDecodeError:
                 continue
+            # usage 可能随最后一块正文到达，也可能是独立事件（include_usage）；
+            # 事件级 on_usage 回调让 UI 能实时显示 token，不必等流结束
+            u = _extract_usage(obj)
+            if u is not None:
+                usage = u
+                if on_usage:
+                    on_usage(u)
             piece = _extract_delta(obj)
             if piece:
                 chunks.append(piece)
@@ -88,16 +137,18 @@ def _post_sse(url: str, headers: dict, body: dict, on_delta, timeout: int) -> st
                 # 无正文的事件（如 glm 等推理模型的 reasoning_content）也回报为
                 # 空心跳，让 UI 知道流仍然活着，而不是一直停在“思考中”
                 on_delta("")
-    return "".join(chunks)
+    return "".join(chunks), usage
 
 
-def _post_with_retry(url: str, headers: dict, body: dict, on_delta) -> str:
+def _post_with_retry(
+    url: str, headers: dict, body: dict, on_delta, on_usage=None
+) -> tuple[str, dict | None]:
     last: Exception | None = None
     for attempt in range(RETRY_TIMES):
         if on_delta:
             on_delta(None)  # 通知 UI 重置当前轮缓冲
         try:
-            return _post_sse(url, headers, body, on_delta, REQUEST_TIMEOUT)
+            return _post_sse(url, headers, body, on_delta, REQUEST_TIMEOUT, on_usage=on_usage)
         except urllib.error.HTTPError as exc:
             try:
                 detail = exc.read().decode("utf-8", "replace")[:500]
@@ -121,7 +172,7 @@ def _post_with_retry(url: str, headers: dict, body: dict, on_delta) -> str:
     raise LLMError(f"重试 {RETRY_TIMES} 次后仍失败：{last}")
 
 
-def chat_openai(messages: list[dict], cfg: dict, on_delta=None) -> str:
+def chat_openai(messages: list[dict], cfg: dict, on_delta=None, on_usage=None) -> tuple[str, dict | None]:
     c = cfg["llm"]
     base = (c.get("openai_base_url") or os.environ.get("OPENAI_BASE_URL", "")).rstrip("/")
     key = c.get("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
@@ -143,7 +194,11 @@ def chat_openai(messages: list[dict], cfg: dict, on_delta=None) -> str:
         body.pop("temperature", None)
         body["max_completion_tokens"] = body.pop("max_tokens")
     return _post_with_retry(
-        base + "/chat/completions", {"Authorization": f"Bearer {key}"}, body, on_delta
+        base + "/chat/completions",
+        {"Authorization": f"Bearer {key}"},
+        body,
+        on_delta,
+        on_usage=on_usage,
     )
 
 
@@ -164,7 +219,7 @@ def _merge_consecutive(messages: list[dict]) -> list[dict]:
     return merged
 
 
-def chat_anthropic(messages: list[dict], cfg: dict, on_delta=None) -> str:
+def chat_anthropic(messages: list[dict], cfg: dict, on_delta=None, on_usage=None) -> tuple[str, dict | None]:
     c = cfg["llm"]
     key = c.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
@@ -188,6 +243,7 @@ def chat_anthropic(messages: list[dict], cfg: dict, on_delta=None) -> str:
         {"x-api-key": key, "anthropic-version": "2023-06-01"},
         body,
         on_delta,
+        on_usage=on_usage,
     )
 
 
@@ -209,7 +265,7 @@ def _serialize_conversation(messages: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def chat_claude_cli(messages: list[dict], cfg: dict, on_delta=None) -> str:
+def chat_claude_cli(messages: list[dict], cfg: dict, on_delta=None) -> tuple[str, dict | None]:
     import shutil
 
     c = cfg["llm"]
@@ -244,13 +300,20 @@ def chat_claude_cli(messages: list[dict], cfg: dict, on_delta=None) -> str:
         raise LLMError(f"claude CLI 无输出：{err[:500]}")
     if on_delta:
         on_delta(out)
-    return out
+    # claude-cli 不返回 usage：统计面板只计能拿到 usage 的 API 通道
+    return out, None
 
 
-def chat(messages: list[dict], cfg: dict, on_delta=None) -> str:
+def chat(messages: list[dict], cfg: dict, on_delta=None, on_usage=None) -> tuple[str, dict | None]:
     provider = (cfg.get("llm", {}).get("provider") or "claude-cli").lower()
     if provider == "openai":
-        return chat_openai(messages, cfg, on_delta)
+        return chat_openai(messages, cfg, on_delta, on_usage=on_usage)
     if provider == "anthropic":
-        return chat_anthropic(messages, cfg, on_delta)
+        return chat_anthropic(messages, cfg, on_delta, on_usage=on_usage)
     return chat_claude_cli(messages, cfg, on_delta)
+
+
+def chat_result(messages: list[dict], cfg: dict, on_delta=None) -> str:
+    """返回纯文本的兼容入口（丢弃 usage）。"""
+    text, _usage = chat(messages, cfg, on_delta)
+    return text

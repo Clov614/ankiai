@@ -35,6 +35,8 @@
   "ui": {
     "panel_width": 560,
     "panel_height": 640,
-    "debug_log": false
+    "panel_font_size": 0,
+    "debug_log": false,
+    "stats_audio_workers": 4
   }
 }

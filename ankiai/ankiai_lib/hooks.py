@@ -38,6 +38,8 @@ class AnkAI:
         action.triggered.connect(self.show_panel_toggle)
         action = self.mw.form.menuTools.addAction("AnkAI 设置…")
         action.triggered.connect(self.open_settings)
+        action = self.mw.form.menuTools.addAction("AnkAI Token 统计…")
+        action.triggered.connect(self.open_stats)
         self._register_shortcuts()
         set_debug_logging(bool(self.get_config().get("ui", {}).get("debug_log", False)))
 
@@ -233,8 +235,20 @@ class AnkAI:
             log("settings dialog built")
             dlg.exec()
             log("settings closed")
+            if self.panel is not None:
+                self.panel.apply_font_config()  # 字号等界面配置保存后立即生效
         except Exception:
             log_exc("open_settings")
+
+    def open_stats(self) -> None:
+        from .util import log, log_exc
+
+        try:
+            log("open_stats")
+            panel = self._ensure_panel()
+            panel.show_stats()
+        except Exception:
+            log_exc("open_stats")
 
     # ---------- 基础设施 ----------
 

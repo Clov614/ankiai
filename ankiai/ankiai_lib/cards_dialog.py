@@ -1,13 +1,16 @@
 """制卡对话框：会话候选卡片 → 复选挑选 → 选牌组 → 写入集合。
 
 添加分两段（借 panel.addon 的 taskman 封装排线程）：
-1. 后台线程逐张合成单词发音（edge-tts，按文本哈希缓存，失败不挡批次）；
+1. 后台线程并发合成单词发音（edge-tts，按文本哈希缓存，失败不挡批次）；
+   并发数可配（ui.stats_audio_workers），默认 4 路，显著缩短批量等待；
 2. 回主线程把 mp3 收进 collection.media 并写笔记（集合操作必须在主线程）。
 """
 
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 from aqt.qt import (
     QCheckBox,
@@ -129,9 +132,9 @@ class CardCandidatesDialog(QDialog):
         form.addRow("AI解析", self.analysis_edit)
         self.memo_edit = QLineEdit()
         form.addRow("词义概述", self.memo_edit)
-        form.addRow(
-            "提示", QLabel("单词/音标/词性/CEFR 只读；其余可直接修改后添加")
-        )
+        _hint = QLabel("单词/音标/词性/CEFR 只读；其余可直接修改后添加")
+        _hint.setWordWrap(True)
+        form.addRow("提示", _hint)
         body.addWidget(form_widget, 6)
 
         bottom = QHBoxLayout()
@@ -302,19 +305,47 @@ class CardCandidatesDialog(QDialog):
         self.status.setText("正在合成单词发音…")
         attach_audio = self.audio_chk.isChecked()
         cfg = self.addon.get_config()
+        # 合成是网络子进程，4 路并发显著缩短批量等待；worker 数可配
+        workers = int(
+            cfg.get("ui", {}).get("stats_audio_workers") or 4
+        )
+
+        def synth_one(cand) -> tuple[str, object | None]:
+            try:
+                return cand.word.lower(), tts.synth(cand.word, cfg)
+            except tts.EdgeTTSMissing as exc:
+                self.addon.run_on_main(
+                    lambda p=exc.python: self.addon._offer_install(p)
+                )
+                return cand.word.lower(), None
+            except Exception:
+                return cand.word.lower(), None  # 单张失败不挡批次：该卡不附音频
 
         def work():
             audio_paths: dict[str, object] = {}
             if attach_audio:
-                for cand in selected:
+                total = len(selected)
+                done = {"n": 0}
+                lock = Lock()
+
+                def on_done(future) -> None:
                     try:
-                        audio_paths[cand.word.lower()] = tts.synth(cand.word, cfg)
-                    except tts.EdgeTTSMissing as exc:
-                        self.addon.run_on_main(
-                            lambda p=exc.python: self.addon._offer_install(p)
-                        )
+                        key, path = future.result()
+                        if path is not None:
+                            audio_paths[key] = path
                     except Exception:
-                        pass  # 单张失败不挡批次：该卡不附音频
+                        pass
+                    with lock:
+                        done["n"] += 1
+                        n = done["n"]
+                    self.addon.run_on_main(
+                        lambda nn=n: self.status.setText(f"正在合成单词发音… {nn}/{total}")
+                    )
+
+                with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                    for cand in selected:
+                        fut = pool.submit(synth_one, cand)
+                        fut.add_done_callback(on_done)
             self.addon.run_on_main(
                 lambda: self._do_add(selected, deck, tags, audio_paths)
             )
